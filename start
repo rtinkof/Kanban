@@ -11,5 +11,6 @@ npm run dev
 
 
 
-board
-app
+git add .
+git commit -m "Краткое описание изменений"
+git push

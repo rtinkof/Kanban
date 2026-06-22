@@ -182,3 +182,34 @@
     border-right-color: var(--border);
   }
 }
+.card-stickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.card-sticker {
+  min-height: 22px;
+  line-height: 22px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: none; /* отключаем эффекты при загрузке, чтобы не было изменения внешнего вида */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-sticker .sticker-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+  white-space: nowrap;
+}
