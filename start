@@ -1,0 +1,15 @@
+cd projects
+cd kanban
+npm run dev
+
+
+
+cd projects
+cd kanban
+cd server
+npm run dev
+
+
+
+board
+app

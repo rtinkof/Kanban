@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Роль пользователя в приложении целиком (не путать с ролью в проекте).
+// ADMIN — администратор (их двое), DIRECTOR — директор (один), EMPLOYEE — рядовой сотрудник.
+enum SystemRole {
+  ADMIN
+  DIRECTOR
+  EMPLOYEE
+}
+
+// Роль участника внутри конкретного проекта
+enum ProjectRole {
+  CURATOR
+  EXECUTOR
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  login     String   @unique
+  email     String?  @unique
+  password  String
+
+  firstName String
+  lastName  String
+
+  role      SystemRole @default(EMPLOYEE)
+
+  // "мягкое" удаление — сотрудник в архиве не может войти в систему
+  // и не отображается в обычных списках, но все его данные (включая
+  // назначения на карточках) сохраняются и видны как раньше.
+  archived  Boolean    @default(false)
+
+  createdAt DateTime @default(now())
+
+  // проекты, которые пользователь создал
+  ownedProjects   Project[]       @relation("ProjectOwner")
+  // участие в чужих/своих проектах (через промежуточную таблицу)
+  projectMembers  ProjectMember[]
+  // карточки, на которые пользователь назначен исполнителем
+  assignedCards   Card[]
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+
+  createdAt   DateTime @default(now())
+
+  ownerId     Int
+  owner       User @relation("ProjectOwner", fields: [ownerId], references: [id])
+
+  members     ProjectMember[]
+  boards      Board[]
+}
+
+// Связка "пользователь состоит в проекте" + его роль именно в этом проекте
+model ProjectMember {
+  id        Int         @id @default(autoincrement())
+
+  projectId Int
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId    Int
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role      ProjectRole @default(EXECUTOR)
+
+  createdAt DateTime    @default(now())
+
+  @@unique([projectId, userId]) // нельзя добавить одного и того же юзера в проект дважды
+}
+
+model Board {
+  id        Int      @id @default(autoincrement())
+  title     String
+
+  position  Int      @default(0) // порядок вкладок досок внутри проекта
+
+  createdAt DateTime @default(now())
+
+  projectId Int
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  columns   Column[]
+}
+
+model Column {
+  id        Int      @id @default(autoincrement())
+  title     String
+
+  position  Int      @default(0) // порядок колонок внутри доски
+
+  createdAt DateTime @default(now())
+
+  boardId   Int
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  cards     Card[]
+}
+
+model Card {
+  id          Int       @id @default(autoincrement())
+  text        String
+
+  completed   Boolean   @default(false)
+
+  position    Int       @default(0) // порядок карточек внутри колонки
+
+  deadline    DateTime?
+
+  createdAt   DateTime  @default(now())
+
+  columnId    Int
+  column      Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  // исполнитель карточки (необязателен)
+  assigneeId  Int?
+  assignee    User?     @relation(fields: [assigneeId], references: [id])
+
+  stickers    Sticker[]
+}
+
+// Стикеры на карточке (приоритет, исполнитель-как-стикер, кастомные и т.д.)
+// Храним гибко: type — какой это стикер, value — текстовое значение/состояние
+model Sticker {
+  id        Int      @id @default(autoincrement())
+
+  type      String   // например "priority", "executor", "custom"
+  value     String?  // например "Срочно", "Исполнитель 2", и т.д.
+
+  cardId    Int
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
