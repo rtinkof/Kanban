@@ -374,10 +374,8 @@ function Column({ columnKey, title, selectMode, isColumnDragging, isEditingTitle
     <div
       ref={setSortableRef}
       style={{
-        transform: CSS.Transform.toString(
-          transform ? { ...transform, y: 0 } : transform,
-        ),
-        transition,
+        transform: CSS.Transform.toString(transform),
+        transition: isColumnDragging ? undefined : transition,
         width: "280px",
         minWidth: "280px",
         flexShrink: 0,

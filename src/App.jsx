@@ -1337,8 +1337,19 @@ function WorkspaceManager({
 // настоящий id записи с сервера в поле "_dbId" у каждой сущности — он
 // используется только нашим кодом синхронизации, board.jsx его не трогает.
 
+const BUILTIN_STICKER_ICONS = {
+  executor: "👤",
+  deadline: "📅",
+  priority: "📊",
+};
+
 function stickerFromServer(s) {
-  return { id: s.type, value: s.value ?? "", _dbId: s.id };
+  return {
+    id: s.type,
+    value: s.value ?? "",
+    _dbId: s.id,
+    icon: s.icon ?? BUILTIN_STICKER_ICONS[s.type] ?? "🏷️",
+  };
 }
 
 function cardFromServer(c) {
