@@ -191,3 +191,30 @@ export function apiUpdateSticker(stickerId, value) {
 export function apiDeleteSticker(stickerId) {
   return request(`/stickers/${stickerId}`, { method: "DELETE" });
 }
+
+/* ===================== CUSTOM STICKERS ===================== */
+
+export function apiGetCustomStickers(boardId) {
+  return request(`/boards/${boardId}/custom-stickers`);
+}
+
+export function apiCreateCustomSticker(boardId, { type, icon, text, states, value }) {
+  return request(`/boards/${boardId}/custom-stickers`, {
+    method: "POST",
+    body: { type, icon, text, states, value }
+  });
+}
+
+// И для обновления:
+export function apiUpdateCustomSticker(stickerId, patch) {
+  return request(`/custom-stickers/${stickerId}`, {
+    method: "PATCH",
+    body: patch
+  });
+}
+
+export function apiDeleteCustomSticker(stickerId) {
+  return request(`/custom-stickers/${stickerId}`, {
+    method: "DELETE"
+  });
+}

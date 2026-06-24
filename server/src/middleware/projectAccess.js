@@ -1,13 +1,5 @@
 import prisma from "../prisma.js";
 
-// Проверяет, что текущий пользователь — владелец или участник проекта,
-// которому принадлежит доска/колонка/карточка из URL.
-// Кладёт найденный projectId в req.projectId для дальнейшего использования.
-//
-// Работает в трёх вариантах в зависимости от того, что передано в URL:
-//  - req.params.projectId  — проверка напрямую по id проекта
-//  - req.params.boardId    — сначала находим доску, берём её projectId
-//  - req.params.columnId   — сначала находим колонку → доску → projectId
 export default async function requireProjectAccess(req, res, next) {
   try {
     const userId = req.user.id;
@@ -16,7 +8,9 @@ export default async function requireProjectAccess(req, res, next) {
     if (req.params.projectId) {
       projectId = Number(req.params.projectId);
     } else if (req.params.boardId) {
-      const board = await prisma.board.findUnique({ where: { id: Number(req.params.boardId) } });
+      const board = await prisma.board.findUnique({ 
+        where: { id: Number(req.params.boardId) } 
+      });
       if (!board) return res.status(404).json({ success: false, message: "Доска не найдена" });
       projectId = board.projectId;
     } else if (req.params.columnId) {
@@ -40,8 +34,16 @@ export default async function requireProjectAccess(req, res, next) {
       });
       if (!sticker) return res.status(404).json({ success: false, message: "Стикер не найден" });
       projectId = sticker.card.column.board.projectId;
+    } else if (req.params.customStickerId) {
+      // ← ИСПРАВЛЕННЫЙ БЛОК
+      const customSticker = await prisma.customSticker.findUnique({
+        where: { id: Number(req.params.customStickerId) },
+        include: { board: { include: { project: true } } },
+      });
+      if (!customSticker) return res.status(404).json({ success: false, message: "Кастомный стикер не найден" });
+      projectId = customSticker.board.projectId;  // ← ПРАВИЛЬНО: projectId лежит в board
     } else {
-      return res.status(400).json({ success: false, message: "Не указан проект/доска/колонка/карточка" });
+      return res.status(400).json({ success: false, message: "Не указан проект/доска/колонка/карточка/стикер" });
     }
 
     const hasAccess = await prisma.project.findFirst({

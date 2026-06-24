@@ -10,7 +10,8 @@ cd server
 npm run dev
 
 
-
+cd projects
+cd kanban
 git add .
 git commit -m "Краткое описание изменений"
 git push

@@ -90,6 +90,7 @@ model Board {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   columns   Column[]
+  customStickers CustomSticker[] 
 }
 
 model Column {
@@ -140,4 +141,23 @@ model Sticker {
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
+}
+
+// Кастомные стикеры, создаваемые пользователем для конкретной доски
+model CustomSticker {
+  id        Int      @id @default(autoincrement())
+  boardId   Int
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  
+  type      String   // "states" | "daterange" | "text" | "number"
+  icon      String   // эмодзи
+  text      String   // название стикера
+  states    Json?    // для типа "states" - массив {label, color}
+  value     Json?
+  hidden    Boolean  @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([boardId, text])
 }

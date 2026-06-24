@@ -7,6 +7,7 @@ import projectRoutes from "./routes/projectRoutes.js";
 import boardRoutes from "./routes/boardRoutes.js";
 import columnRoutes from "./routes/columnRoutes.js";
 import cardRoutes from "./routes/cardRoutes.js";
+import stickerSettingsRoutes from "./routes/stickerSettingsRoutes.js";
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use("/api/projects", projectRoutes);
 app.use("/api", boardRoutes);
 app.use("/api", columnRoutes);
 app.use("/api", cardRoutes);
+app.use("/api", stickerSettingsRoutes);
 
 const PORT = 5000;
 

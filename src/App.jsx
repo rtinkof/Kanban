@@ -2560,6 +2560,7 @@ function KanbanApp({ currentUser, onLogout }) {
         {activeBoard && (
           <Board
             board={activeBoard.data}
+            boardId={activeBoard._dbId} 
             setBoard={updateBoard}
             boards={boards}
             setBoards={setBoards}
