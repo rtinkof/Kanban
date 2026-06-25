@@ -24,7 +24,7 @@ import {
 
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
-import DatePickerModal from "./DatePickerModal";
+import DatePickerModal from "./Datepickermodal";
 import {
   apiCreateCard,
   apiUpdateCard,
