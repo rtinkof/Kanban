@@ -1,21 +1,22 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      './Board': path.resolve(__dirname, './board.jsx'),   // если файл board.jsx
+      './DatePickerModal': path.resolve(__dirname, './datepickerModal.jsx'), // если файл datepickerModal.jsx
+    },
+  },
   server: {
     port: 5173,
-    // proxy: {
-    //   '/api': {
-    //     target: 'http://localhost:5000',
-    //     changeOrigin: true,
-    //   },
-    // },
-  },
-  build: {
-    outDir: 'dist',
-  },
-  optimizeDeps: {
-    include: ['react', 'react-dom', '@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/modifiers'],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
   },
 });
