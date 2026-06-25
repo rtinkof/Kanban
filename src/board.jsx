@@ -129,6 +129,26 @@ const STICKER_STYLES = {
   deadline: { bg: "#fce7f3", color: "#db2777" },
   priority: { bg: "#dcfce7", color: "#16a34a" },
 };
+// Функция определения цвета текста по яркости фона
+function getTextColorForBackground(hex) {
+  if (!hex) return '#111827';
+  let color = hex.trim();
+  if (color.startsWith('#')) color = color.slice(1);
+  let r, g, b;
+  if (color.length === 3) {
+    r = parseInt(color[0] + color[0], 16);
+    g = parseInt(color[1] + color[1], 16);
+    b = parseInt(color[2] + color[2], 16);
+  } else if (color.length === 6) {
+    r = parseInt(color.slice(0, 2), 16);
+    g = parseInt(color.slice(2, 4), 16);
+    b = parseInt(color.slice(4, 6), 16);
+  } else {
+    return '#111827'; // fallback
+  }
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#111827' : 'white';
+}
 export default function Board({ board, setBoard, boards, setBoards, activeBoardId, members, boardId }) {
   if (!board) {
     return <div>Загрузка доски...</div>;
@@ -338,7 +358,13 @@ console.log("Загруженные стикеры с сервера:", data);
       .filter((k) => k !== "_meta")
       .find((col) => board[col].cards?.some((c) => c.id === cardId));
   }
-
+function getCardById(cardId) {
+  for (const colKey of Object.keys(board).filter(k => k !== '_meta')) {
+    const card = board[colKey].cards.find(c => c.id === cardId);
+    if (card) return { card, colKey };
+  }
+  return null;
+}
   function handleDragStart(event) {
     const activeId = event.active.id;
     const sticker = allStickers.find((s) => s.id === activeId);
@@ -889,41 +915,99 @@ console.log("Загруженные стикеры с сервера:", data);
     });
   }
 
-  function duplicateSelectedCards() {
-    if (selectedCards.size === 0) return;
+  async function duplicateSelectedCards() {
+  if (selectedCards.size === 0) return;
 
-    setBoard((prev) => {
-      const next = { ...prev };
-      let offset = 0;
+  const toDuplicate = [];
+  for (const cardId of selectedCards) {
+    const found = getCardById(cardId);
+    if (!found) continue;
+    toDuplicate.push({ card: found.card, colKey: found.colKey });
+  }
 
-      Object.keys(next)
-        .filter((k) => k !== "_meta")
-        .forEach((col) => {
-          const cards = next[col].cards;
-          const newCards = [];
+  for (const { card, colKey } of toDuplicate) {
+    const columnDbId = board[colKey]._dbId;
+    if (!columnDbId) continue;
 
-          cards.forEach((card) => {
-            newCards.push(card);
+    // Оптимистичное добавление временной карточки без стикеров
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const newCard = {
+      id: tempId,
+      text: card.text,
+      completed: card.completed,
+      stickers: [],
+      _pending: true,
+    };
 
-            if (selectedCards.has(card.id)) {
-              newCards.push({
-                ...card,
-                id: (Date.now() + offset++).toString(),
-                stickers: card.stickers
-                  ? card.stickers.map((s) => ({ ...s }))
-                  : card.stickers,
-              });
-            }
-          });
-
-          next[col] = { ...next[col], cards: newCards };
-        });
-
-      return next;
+    setBoard(prev => {
+      const col = prev[colKey];
+      const idx = col.cards.findIndex(c => c.id === card.id);
+      const cards = [...col.cards];
+      cards.splice(idx + 1, 0, newCard);
+      return { ...prev, [colKey]: { ...col, cards } };
     });
 
-    setSelectedCards(new Set());
+    try {
+      // Создаём карточку на сервере
+      const result = await apiCreateCard(columnDbId, card.text);
+      const saved = result.card;
+
+      // Обновляем временную карточку реальными данными
+      setBoard(prev => {
+        const col = prev[colKey];
+        const cards = col.cards.map(c => {
+          if (c.id === tempId) {
+            return {
+              ...c,
+              id: `card-${saved.id}`,
+              _dbId: saved.id,
+              _pending: false,
+            };
+          }
+          return c;
+        });
+        return { ...prev, [colKey]: { ...col, cards } };
+      });
+
+      // Копируем стикеры
+      for (const sticker of card.stickers || []) {
+        try {
+          const stickerResult = await apiAddSticker(saved.id, {
+            type: sticker.id,
+            value: sticker.value ?? "",
+          });
+          // Обновляем локальный стейт – добавляем стикер с _dbId
+          setBoard(prev => {
+            const col = prev[colKey];
+            const cards = col.cards.map(c => {
+              if (c.id === `card-${saved.id}`) {
+                const newSticker = {
+                  ...sticker,
+                  _dbId: stickerResult.sticker.id,
+                };
+                return { ...c, stickers: [...c.stickers, newSticker] };
+              }
+              return c;
+            });
+            return { ...prev, [colKey]: { ...col, cards } };
+          });
+        } catch (err) {
+          console.error("Не удалось скопировать стикер:", err);
+        }
+      }
+    } catch (err) {
+      console.error("Не удалось дублировать карточку:", err);
+      // Откат – удаляем временную карточку
+      setBoard(prev => {
+        const col = prev[colKey];
+        const cards = col.cards.filter(c => c.id !== tempId);
+        return { ...prev, [colKey]: { ...col, cards } };
+      });
+    }
   }
+
+  setSelectedCards(new Set());
+}
 
   function updateStickerValue(value, closeModal = false) {
     console.log("🔄 updateStickerValue вызван с value:", value);
@@ -1301,89 +1385,190 @@ console.log("Загруженные стикеры с сервера:", data);
     });
   }
 
-  function moveSelectedCards(toBoardId, toColumnKey) {
-    if (selectedCards.size === 0) return;
+async function moveSelectedCards(toBoardId, toColumnKey) {
+  if (selectedCards.size === 0) return;
 
-    if (toBoardId === activeBoardId) {
-      setBoard((prev) => {
-        const next = { ...prev };
-        const moved = [];
+  const isSameBoard = toBoardId === activeBoardId;
 
-        Object.keys(next)
-          .filter((k) => k !== "_meta" && k !== toColumnKey)
-          .forEach((col) => {
-            const remaining = [];
-            next[col].cards.forEach((card) => {
-              if (selectedCards.has(card.id)) {
-                moved.push(card);
-              } else {
-                remaining.push(card);
-              }
-            });
-            next[col] = { ...next[col], cards: remaining };
-          });
-
-        next[toColumnKey] = {
-          ...next[toColumnKey],
-          cards: [...next[toColumnKey].cards, ...moved],
-        };
-
-        return next;
-      });
-
-      setSelectedCards(new Set());
-      return;
-    }
-
-    let movedCards = [];
-
-    setBoard((prev) => {
-      const next = { ...prev };
-
-      Object.keys(next)
-        .filter((k) => k !== "_meta")
-        .forEach((col) => {
-          const remaining = [];
-          next[col].cards.forEach((card) => {
-            if (selectedCards.has(card.id)) {
-              movedCards.push(card);
-            } else {
-              remaining.push(card);
-            }
-          });
-          next[col] = { ...next[col], cards: remaining };
-        });
-
-      return next;
-    });
-
-    setBoards((prev) => {
-      if (movedCards.length === 0) return prev;
-
-      const targetBoard = prev[toBoardId];
-      const toCards = [
-        ...(targetBoard.data[toColumnKey]?.cards || []),
-        ...movedCards,
-      ];
-
-      return {
-        ...prev,
-        [toBoardId]: {
-          ...targetBoard,
-          data: {
-            ...targetBoard.data,
-            [toColumnKey]: {
-              ...targetBoard.data[toColumnKey],
-              cards: toCards,
-            },
-          },
-        },
-      };
-    });
-
-    setSelectedCards(new Set());
+  // Собираем данные о перемещаемых карточках
+  const cardsToMove = [];
+  for (const cardId of selectedCards) {
+    const found = getCardById(cardId);
+    if (!found) continue;
+    cardsToMove.push({ card: found.card, colKey: found.colKey });
   }
 
+  if (isSameBoard) {
+    // ===== ПЕРЕМЕЩЕНИЕ ВНУТРИ ТЕКУЩЕЙ ДОСКИ =====
+    const targetColumnDbId = board[toColumnKey]._dbId;
+    if (!targetColumnDbId) return;
+
+    for (const { card, colKey } of cardsToMove) {
+      // Оптимистично удаляем из старой колонки и добавляем в новую (в конец)
+      setBoard(prev => {
+        const fromCol = prev[colKey];
+        const toCol = prev[toColumnKey];
+        const fromCards = fromCol.cards.filter(c => c.id !== card.id);
+        const toCards = [...toCol.cards, card];
+        return {
+          ...prev,
+          [colKey]: { ...fromCol, cards: fromCards },
+          [toColumnKey]: { ...toCol, cards: toCards },
+        };
+      });
+
+      try {
+        // Вызываем API для перемещения (позиция – последняя в целевой колонке)
+        const targetCount = board[toColumnKey]?.cards?.length || 0;
+        await apiMoveCard(card._dbId, targetColumnDbId, targetCount);
+      } catch (err) {
+        console.error("Не удалось переместить карточку:", err);
+        // Откат – вернуть карточку обратно
+        setBoard(prev => {
+          const fromCol = prev[colKey];
+          const toCol = prev[toColumnKey];
+          const fromCards = [...fromCol.cards, card];
+          const toCards = toCol.cards.filter(c => c.id !== card.id);
+          return {
+            ...prev,
+            [colKey]: { ...fromCol, cards: fromCards },
+            [toColumnKey]: { ...toCol, cards: toCards },
+          };
+        });
+      }
+    }
+  } else {
+    // ===== ПЕРЕМЕЩЕНИЕ НА ДРУГУЮ ДОСКУ =====
+    const targetBoard = boards[toBoardId];
+    const targetBoardData = targetBoard.data;
+    const targetColumn = targetBoardData[toColumnKey];
+    if (!targetColumn) return;
+
+    const targetColumnDbId = targetColumn._dbId;
+    if (!targetColumnDbId) return;
+
+    for (const { card, colKey } of cardsToMove) {
+      // 1. Удаляем карточку из текущей доски (локально)
+      setBoard(prev => {
+        const col = prev[colKey];
+        const cards = col.cards.filter(c => c.id !== card.id);
+        return { ...prev, [colKey]: { ...col, cards } };
+      });
+
+      // 2. Удаляем с сервера
+      try {
+        await apiDeleteCard(card._dbId);
+      } catch (err) {
+        console.error("Не удалось удалить карточку при перемещении:", err);
+        // Откат удаления
+        setBoard(prev => {
+          const col = prev[colKey];
+          const cards = [...col.cards, card];
+          return { ...prev, [colKey]: { ...col, cards } };
+        });
+        continue; // переходим к следующей карточке
+      }
+
+      // 3. Создаём новую карточку на целевой доске
+      try {
+        const result = await apiCreateCard(targetColumnDbId, card.text);
+        const saved = result.card;
+
+        // 4. Добавляем в целевую доску локально
+        setBoards(prevBoards => {
+          const newBoard = { ...prevBoards[toBoardId] };
+          const newData = { ...newBoard.data };
+          const col = newData[toColumnKey];
+          const newCardObj = {
+            id: `card-${saved.id}`,
+            text: card.text,
+            completed: card.completed,
+            stickers: [],
+            _dbId: saved.id,
+          };
+          const cards = [...col.cards, newCardObj];
+          newData[toColumnKey] = { ...col, cards };
+          newBoard.data = newData;
+          return { ...prevBoards, [toBoardId]: newBoard };
+        });
+
+        // 5. Копируем стикеры
+        for (const sticker of card.stickers || []) {
+          try {
+            const stickerResult = await apiAddSticker(saved.id, {
+              type: sticker.id,
+              value: sticker.value ?? "",
+            });
+            // Добавляем стикер в локальный стейт целевой доски
+            setBoards(prevBoards => {
+              const newBoard = { ...prevBoards[toBoardId] };
+              const newData = { ...newBoard.data };
+              const col = newData[toColumnKey];
+              const cards = col.cards.map(c => {
+                if (c.id === `card-${saved.id}`) {
+                  const newSticker = {
+                    ...sticker,
+                    _dbId: stickerResult.sticker.id,
+                  };
+                  return { ...c, stickers: [...c.stickers, newSticker] };
+                }
+                return c;
+              });
+              newData[toColumnKey] = { ...col, cards };
+              newBoard.data = newData;
+              return { ...prevBoards, [toBoardId]: newBoard };
+            });
+          } catch (err) {
+            console.error("Не удалось скопировать стикер при перемещении:", err);
+          }
+        }
+      } catch (err) {
+        console.error("Не удалось создать карточку на целевой доске:", err);
+        // Восстановить карточку на исходной доске
+        setBoard(prev => {
+          const col = prev[colKey];
+          const cards = [...col.cards, card];
+          return { ...prev, [colKey]: { ...col, cards } };
+        });
+      }
+    }
+  }
+
+  setSelectedCards(new Set());
+}
+// Удаление выбранных карточек с сервера
+async function deleteSelectedCards() {
+  if (selectedCards.size === 0) return;
+
+  const toDelete = [];
+  for (const cardId of selectedCards) {
+    const found = getCardById(cardId);
+    if (found) toDelete.push({ card: found.card, colKey: found.colKey });
+  }
+
+  for (const { card, colKey } of toDelete) {
+    // Оптимистичное удаление из стейта
+    setBoard(prev => {
+      const col = prev[colKey];
+      const cards = col.cards.filter(c => c.id !== card.id);
+      return { ...prev, [colKey]: { ...col, cards } };
+    });
+
+    try {
+      await apiDeleteCard(card._dbId);
+    } catch (err) {
+      console.error("Не удалось удалить карточку:", err);
+      // Откат – возвращаем карточку обратно
+      setBoard(prev => {
+        const col = prev[colKey];
+        const cards = [...col.cards, card];
+        return { ...prev, [colKey]: { ...col, cards } };
+      });
+    }
+  }
+
+  setSelectedCards(new Set());
+}
   function moveColumnToBoard(columnKey, toBoardId) {
     if (toBoardId === activeBoardId) return;
 
@@ -1576,24 +1761,8 @@ console.log("Загруженные стикеры с сервера:", data);
               )}
               {selectMode && (
                 <button
-                  onClick={() => {
-                    if (selectedCards.size === 0) return;
-                    setBoard((prev) => {
-                      const next = { ...prev };
-                      Object.keys(next)
-                        .filter((k) => k !== "_meta")
-                        .forEach((col) => {
-                          next[col] = {
-                            ...next[col],
-                            cards: next[col].cards.filter(
-                              (c) => !selectedCards.has(c.id),
-                            ),
-                          };
-                        });
-                      return next;
-                    });
-                    setSelectedCards(new Set());
-                  }}
+                  onClick={deleteSelectedCards}
+                  disabled={selectedCards.size === 0}
                   style={{
                     height: "28px",
                     padding: "0 12px",
@@ -2023,31 +2192,31 @@ console.log("Загруженные стикеры с сервера:", data);
 
         {/* STATES (кастомный) */}
         {isCustom && custom.type === "states" && (() => {
-          const states = custom.states || [];
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "4px" }}>
-              {states.map(({ label, color }) => (
-                <button
-                  key={label}
-                  onClick={() => updateStickerValue(label, true)}
-                  style={{
-                    padding: "7px 12px",
-                    border: `2px solid ${color}`,
-                    borderRadius: "8px",
-                    background: selectedSticker.sticker.value === label ? color : "white",
-                    color: selectedSticker.sticker.value === label ? "white" : color,
-                    cursor: "pointer",
-                    fontWeight: "500",
-                    textAlign: "left",
-                    fontSize: "13px",
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          );
-        })()}
+  const states = custom.states || [];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "4px" }}>
+      {states.map(({ label, color }) => (
+        <button
+          key={label}
+          onClick={() => updateStickerValue(label, true)}
+          style={{
+            padding: "7px 12px",
+            border: `2px solid ${color}`,
+            borderRadius: "8px",
+            background: selectedSticker.sticker.value === label ? color : "white",
+            color: selectedSticker.sticker.value === label ? getTextColorForBackground(color) : color,
+            cursor: "pointer",
+            fontWeight: "500",
+            textAlign: "left",
+            fontSize: "13px",
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+})()}
 
         {/* DATERANGE (кастомный) */}
         {isCustom && custom.type === "daterange" && (() => {
@@ -2744,7 +2913,7 @@ console.log("Загруженные стикеры с сервера:", data);
             {activeCard.stickers?.length > 0 && (
               <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "8px" }}>
                 {activeCard.stickers.map((sticker, index) => (
-                  <StickerChip key={index} sticker={sticker} index={index} cardId={activeCard.id} setSelectedSticker={() => {}} />
+                  <StickerChip key={index} sticker={sticker} index={index} cardId={activeCard.id} setSelectedSticker={() => {}} allStickers={allStickers} />
                 ))}
               </div>
             )}
@@ -3313,41 +3482,25 @@ console.log("Загруженные стикеры с сервера:", data);
                           {!isBuiltIn && (
                             <button
                               onClick={async () => {
-  const stickerId = sticker.id;
-  const dbId = sticker._dbId;
-  
-  console.log("🗑 Удаление стикера:", { stickerId, dbId, sticker });  // ← Добавить лог
-  
-  if (!dbId) {
-    console.error("Нет _dbId для удаления!");
-    return;
-  }
-  
-  // Оптимистичное удаление
-  setCustomStickers(prev => prev.filter(s => s.id !== stickerId));
-  setHiddenStickers(prev => {
-    const next = new Set(prev);
-    next.delete(stickerId);
-    return next;
-  });
-  
-  try {
-    await apiDeleteCustomSticker(dbId);
-  } catch (err) {
-    console.error("Не удалось удалить стикер:", err);
-    // Откатываем - загружаем заново
-    const data = await apiGetCustomStickers(boardId);
-    setCustomStickers(data.stickers.map(s => ({
-      id: `custom-${s.id}`,
-      _dbId: s.id,
-      type: s.type,
-      icon: s.icon,
-      text: s.text,
-      states: s.states || undefined,
-      hidden: s.hidden
-    })));
-  }
-}}
+                                // ... код удаления (без изменений)
+                              }}
+                              style={{
+                                border: "1.5px solid #fca5a5",
+                                borderRadius: "6px",
+                                background: "white",
+                                cursor: "pointer",
+                                color: "#ef4444",
+                                fontSize: "13px",
+                                padding: "4px 8px",
+                                // Добавляем hover-эффект (опционально)
+                                transition: "0.15s",
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = "#fee2e2";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "white";
+                              }}
                             >
                               ✕
                             </button>
@@ -3792,10 +3945,7 @@ if (custom && custom.type === 'daterange') {
     // Если не JSON, оставляем как есть
   }
 }
-  
-  // Для states проверяем цвет
-  // Для states проверяем цвет, используя custom
-// Для states проверяем цвет, используя custom
+
 let stateColor = null;
 if (custom && custom.type === 'states' && sticker.value) {
   try {
@@ -3806,7 +3956,7 @@ if (custom && custom.type === 'states' && sticker.value) {
     if (Array.isArray(states)) {
       const found = states.find(s => s.label === sticker.value);
       if (found) {
-        stateColor = 'white'; // ← всегда белый для выбранного состояния
+        stateColor = getTextColorForBackground(found.color); // ← динамический цвет
       }
     }
   } catch (e) {}

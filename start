@@ -1,5 +1,6 @@
 cd projects
 cd kanban
+cd src
 npm run dev
 
 
